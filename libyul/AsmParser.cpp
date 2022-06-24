@@ -192,10 +192,14 @@ optional<pair<string_view, SourceLocation>> Parser::parseSrcComment(
 )
 {
 	static regex const argsRegex = regex(
-		R"~~(^(-1|\d+):(-1|\d+):(-1|\d+)(?:\s+|$))~~"  // index and location, e.g.: 1:234:-1
+		R"~~(^(-1|\d+):(-1|\d+):(-1|\d+)(?:\s+|$))~~",  // index and location, e.g.: 1:234:-1
+		regex_constants::ECMAScript | regex_constants::optimize
+	);
+	static regex const snippetRegex = regex(
 		R"~~(("(?:[^"\\]|\\.)*"?)?)~~",                // optional code snippet, e.g.: "string memory s = \"abc\";..."
 		regex_constants::ECMAScript | regex_constants::optimize
 	);
+
 	match_results<string_view::const_iterator> match;
 	if (!regex_search(_arguments.cbegin(), _arguments.cend(), match, argsRegex))
 	{
@@ -207,20 +211,24 @@ optional<pair<string_view, SourceLocation>> Parser::parseSrcComment(
 		return nullopt;
 	}
 
-	solAssert(match.size() == 5, "");
+	solAssert(match.size() == 4, "");
 	string_view tail = _arguments.substr(static_cast<size_t>(match.position() + match.length()));
 
-	if (match[4].matched && (
-		!boost::algorithm::ends_with(match[4].str(), "\"") ||
-		boost::algorithm::ends_with(match[4].str(), "\\\"")
-	))
+	match_results<string_view::const_iterator> snippetMatch;
+	if (regex_search(_arguments.cbegin()  + match.length(), _arguments.cend(), snippetMatch, snippetRegex))
 	{
-		m_errorReporter.syntaxError(
-			1544_error,
-			_commentLocation,
-			"Invalid code snippet in source location mapping. Quote is not terminated."
-		);
-		return {{tail, SourceLocation{}}};
+		if (snippetMatch[1].matched && (
+			!boost::algorithm::ends_with(snippetMatch[1].str(), "\"") ||
+			boost::algorithm::ends_with(snippetMatch[1].str(), "\\\"")
+		))
+		{
+			m_errorReporter.syntaxError(
+				1544_error,
+				_commentLocation,
+				"Invalid code snippet in source location mapping. Quote is not terminated."
+			);
+			return {{tail, SourceLocation{}}};
+		}
 	}
 
 	optional<int> const sourceIndex = toInt(match[1].str());
